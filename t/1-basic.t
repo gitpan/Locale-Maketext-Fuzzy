@@ -1,9 +1,9 @@
 #!/usr/bin/perl -w
 # $File: //member/autrijus/Locale-Maketext-Fuzzy/t/1-basic.t $ $Author: autrijus $
-# $Revision: #1 $ $Change: 544 $ $DateTime: 2002/08/01 21:24:50 $
+# $Revision: #2 $ $Change: 1124 $ $DateTime: 2002/10/01 07:37:28 $
 
 use strict;
-use Test::More tests => 14;
+use Test::More tests => 15;
 
 package MyApp::L10N;
 use Test::More;
@@ -72,9 +72,15 @@ is(
 );
 
 is(
-    $lh->maketext('Perl released!'),
-    '!Perl ist frei!',
+    $lh->maketext('[Perl] released!'),
+    '![Perl] ist frei!',
     'fuzzy match on the broader candidate',
+);
+
+is(
+    eval { $lh->maketext('Square [bracket]!') },
+    'Square [bracket]!',
+    'no interpolation on failed matches',
 );
 
 ################################################################

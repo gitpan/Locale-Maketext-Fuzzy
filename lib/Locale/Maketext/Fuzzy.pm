@@ -1,8 +1,8 @@
 # $File: //member/autrijus/Locale-Maketext-Fuzzy/lib/Locale/Maketext/Fuzzy.pm $ $Author: autrijus $
-# $Revision: #2 $ $Change: 554 $ $DateTime: 2002/08/02 00:58:42 $
+# $Revision: #4 $ $Change: 1124 $ $DateTime: 2002/10/01 07:37:28 $
 
 package Locale::Maketext::Fuzzy;
-$Locale::Maketext::Fuzzy::VERSION = '0.01';
+$Locale::Maketext::Fuzzy::VERSION = '0.02';
 
 use strict;
 use Locale::Maketext;
@@ -14,7 +14,7 @@ Locale::Maketext::Fuzzy - Maketext from already interpolated strings
 
 =head1 VERSION
 
-This document describes version 0.01 of Locale::Maketext::Fuzzy.
+This document describes version 0.02 of Locale::Maketext::Fuzzy.
 
 =head1 SYNOPSIS
 
@@ -204,8 +204,7 @@ sub maketext_fuzzy {
     }
 
     # Fail early if we cannot find anything that matches
-    return $handle->SUPER::maketext($phrase, @_)
-	unless %candidate;
+    return $phrase unless %candidate;
 
     # Fuzzy match phase 2 -- select the best candidate
     $phrase = (sort {
