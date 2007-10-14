@@ -1,6 +1,4 @@
 #!/usr/bin/perl -w
-# $File: //member/autrijus/Locale-Maketext-Fuzzy/t/1-basic.t $ $Author: autrijus $
-# $Revision: #2 $ $Change: 1124 $ $DateTime: 2002/10/01 07:37:28 $
 
 use strict;
 use Test::More tests => 15;

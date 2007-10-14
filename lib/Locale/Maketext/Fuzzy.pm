@@ -1,12 +1,131 @@
-# $File: //member/autrijus/Locale-Maketext-Fuzzy/lib/Locale/Maketext/Fuzzy.pm $ $Author: autrijus $
-# $Revision: #4 $ $Change: 1124 $ $DateTime: 2002/10/01 07:37:28 $
-
 package Locale::Maketext::Fuzzy;
-$Locale::Maketext::Fuzzy::VERSION = '0.02';
+$Locale::Maketext::Fuzzy::VERSION = '0.10';
 
+use 5.005;
 use strict;
 use Locale::Maketext;
 use base 'Locale::Maketext';
+
+sub override_maketext {
+    my ( $class, $flag ) = @_;
+    $class = ref($class) if ref($class);
+
+    no strict 'refs';
+
+    if ($flag) {
+        *{"$class\::maketext"} = \&maketext_fuzzy;
+    }
+    elsif ( @_ >= 2 ) {
+        delete ${"$class\::"}{maketext};
+    }
+
+    return ( defined &{"$class\::maketext"} ? 1 : 0 );
+}
+
+# Global cache of entries and their regexified forms
+my %regex_cache;
+
+sub maketext_fuzzy {
+    my ( $handle, $phrase ) = splice( @_, 0, 2 );
+
+    # An array of all lexicon hashrefs
+    my @lexicons = @{ $handle->_lex_refs };
+
+    # Try exact match if possible at all.
+    foreach my $lex (@lexicons) {
+        return $handle->SUPER::maketext( $phrase, @_ )
+          if exists $lex->{$phrase};
+    }
+
+    # Keys are matched entries; values are arrayrefs of extracted params
+    my %candidate;
+
+    # Fuzzy match phase 1 -- extract all candidates
+    foreach my $lex (@lexicons) {
+
+        # We're not interested in non-bracketed entries, so ignore them
+        foreach my $entry ( grep /(?:(?<!~)(?:~~)*)\[/, keys %{$lex} ) {
+            my $re = ( $regex_cache{$entry} ||= [ _regexify($entry) ] );
+            my @vars = ( $phrase =~ $re->[0] ) or next;
+            $candidate{$entry} ||=
+              ( @{ $re->[1] } ? [ @vars[ @{ $re->[1] } ] ] : \@vars );
+        }
+    }
+
+    # Fail early if we cannot find anything that matches
+    return $phrase unless %candidate;
+
+    # Fuzzy match phase 2 -- select the best candidate
+    $phrase = (
+        sort {
+
+            # For now, we just use a very crude heuristic: "Longer is better"
+            length($b) <=> length($a)
+              or $b cmp $a
+          } keys %candidate
+    )[0];
+
+    return $handle->SUPER::maketext( $phrase, @{ $candidate{$phrase} }, @_ );
+}
+
+sub _regexify {
+    my $text = quotemeta(shift);
+    my @ords;
+
+    $text =~ s{
+	(				# capture into $1...
+	    (?<!\\~)(?:\\~\\~)*		#   an even number of ~ characters
+	)				#   (to be restored back)
+	\\\[				# opening bracket
+
+	(				# capture into $2...
+	    (?:				#   any numbers of
+		[^~\]]			#     ordinary non-] characters
+		    |			#       or
+		~\\?.			#     escaped characters
+	    )*
+	)
+	\\\]				# closing bracket
+    }{
+	$1._paramify($2, \@ords)
+    }egx;
+
+    $text =~ s/\Q.*?\E$/.*/;
+    return qr/^$text$/, \@ords;
+}
+
+sub _paramify {
+    my ( $text, $ordref ) = @_;
+    my $out = '(.*?)';
+    my @choices = split( /\\,/, $text );
+
+    if ( $choices[0] =~ /^(?:\w+|\\#|\\\*)$/ ) {
+
+        # Do away with the function name
+        shift @choices unless $choices[0] =~ /^_(?:\d+|\\\*)$/;
+
+        # Build an alternate regex to weed out vars
+        $out .= '(?:' . join(
+            '|',
+            sort {
+                length($b) <=> length($a)    # longest first
+              } map {
+                /^_(?:(\d+)|\\\*)$/
+                  ? do {
+                    push @{$ordref}, ( $1 - 1 ) if defined $1;
+                    '';
+                  }
+                  : $_                       # turn _1, _2, _*... into ''
+              } @choices
+        ) . ')';
+
+        $out =~ s/\Q(?:)\E$//;
+    }
+
+    return $out;
+}
+
+1;
 
 =head1 NAME
 
@@ -14,7 +133,8 @@ Locale::Maketext::Fuzzy - Maketext from already interpolated strings
 
 =head1 VERSION
 
-This document describes version 0.02 of Locale::Maketext::Fuzzy.
+This document describes version 0.10 of Locale::Maketext::Fuzzy, released
+October 14, 2007.
 
 =head1 SYNOPSIS
 
@@ -66,9 +186,11 @@ This document describes version 0.02 of Locale::Maketext::Fuzzy.
 
 This module is a subclass of C<Locale::Maketext>, with additional
 support for localizing messages that already contains interpolated
-variables.  This is most useful when the messages are returned by
-external modules -- for example, to match C<dir: command not found>
-against C<[_1]: command not found>.
+variables.
+
+This is most useful when the messages are returned by external sources
+-- for example, to match C<dir: command not found> against
+C<[_1]: command not found>.
 
 Of course, this module is also useful if you're simply too lazy
 to use the
@@ -155,129 +277,11 @@ performed, and may cause serious speed penalty.  Patches welcome.
 
 =back
 
-=cut
-
-sub override_maketext {
-    my ($class, $flag) = @_;
-    $class = ref($class) if ref($class);
-
-    no strict 'refs';
-
-    if ($flag) {
-	*{"$class\::maketext"} = \&maketext_fuzzy;
-    }
-    elsif (@_ >= 2) {
-	delete ${"$class\::"}{maketext};
-    }
-
-    return (defined &{"$class\::maketext"} ? 1 : 0);
-}
-
-# Global cache of entries and their regexified forms
-my %regex_cache;
-
-sub maketext_fuzzy {
-    my ($handle, $phrase) = splice(@_, 0, 2);
-
-    # An array of all lexicon hashrefs
-    my @lexicons = @{$handle->_lex_refs};
-
-    # Try exact match if possible at all.
-    foreach my $lex (@lexicons) {
-	return $handle->SUPER::maketext($phrase, @_)
-	    if exists $lex->{$phrase};
-    }
-
-    # Keys are matched entries; values are arrayrefs of extracted params
-    my %candidate;
-
-    # Fuzzy match phase 1 -- extract all candidates
-    foreach my $lex (@lexicons) {
-	# We're not interested in non-bracketed entries, so ignore them
-	foreach my $entry (grep /(?:(?<!~)(?:~~)*)\[/, keys %{$lex}) {
-	    my $re = ($regex_cache{$entry} ||= [ _regexify($entry) ]);
-	    my @vars = ($phrase =~ $re->[0]) or next;
-	    $candidate{$entry} ||= (
-		@{$re->[1]} ? [ @vars[@{$re->[1]}] ] : \@vars
-	    );
-	}
-    }
-
-    # Fail early if we cannot find anything that matches
-    return $phrase unless %candidate;
-
-    # Fuzzy match phase 2 -- select the best candidate
-    $phrase = (sort {
-	# For now, we just use a very crude heuristic: "Longer is better"
-	length($b) <=> length($a)
-	    or $b cmp $a
-    } keys %candidate)[0];
-
-    return $handle->SUPER::maketext(
-	$phrase, @{$candidate{$phrase}}, @_
-    );
-}
-
-sub _regexify {
-    my $text = quotemeta(shift);
-    my @ords;
-
-    $text =~ s{
-	(				# capture into $1...
-	    (?<!\\~)(?:\\~\\~)*		#   an even number of ~ characters
-	)				#   (to be restored back)
-	\\\[				# opening bracket
-
-	(				# capture into $2...
-	    (?:				#   any numbers of
-		[^~\]]			#     ordinary non-] characters
-		    |			#       or
-		~\\?.			#     escaped characters
-	    )*
-	)
-	\\\]				# closing bracket
-    }{
-	$1._paramify($2, \@ords)
-    }egx;
-
-    $text =~ s/\Q.*?\E$/.*/;
-    return qr/^$text$/, \@ords;
-}
-
-sub _paramify {
-    my ($text, $ordref) = @_;
-    my $out = '(.*?)';
-    my @choices = split(/\\,/, $text);
-
-    if ($choices[0] =~ /^(?:\w+|\\#|\\\*)$/) {
-	# Do away with the function name
-	shift @choices unless $choices[0] =~ /^_(?:\d+|\\\*)$/;
-
-	# Build an alternate regex to weed out vars
-	$out .= '(?:' . join(
-	    '|', sort {
-		length($b) <=> length($a)	# longest first
-	    } map {
-		/^_(?:(\d+)|\\\*)$/ ? do {
-		    push @{$ordref}, ($1 - 1) if defined $1;
-		    '';
-		} : $_	# turn _1, _2, _*... into ''
-	    } @choices
-	) . ')';
-
-	$out =~ s/\Q(?:)\E$//;
-    }
-
-    return $out;
-}
-
-1;
-
 =head1 SEE ALSO
 
 L<Locale::Maketext>, L<Locale::Maketext::Lexicon>
 
-=head1 BACKGROUND
+=head1 HISTORY
 
 This particular module was written to facilitate an I<auto-extraction>
 layer for Slashcode's I<Template Toolkit> provider, based on
@@ -307,15 +311,32 @@ C<Locale::Maketext::Fuzzy> was born.
 
 =head1 AUTHORS
 
-Autrijus Tang E<lt>autrijus@autrijus.orgE<gt>
+Audrey Tang E<lt>cpan@audreyt.orgE<gt>
 
 =head1 COPYRIGHT
 
-Copyright 2002 by Autrijus Tang E<lt>autrijus@autrijus.orgE<gt>.
+Copyright 2002, 2007 by Audrey Tang E<lt>cpan@audreyt.orgE<gt>.
 
-This program is free software; you can redistribute it and/or 
-modify it under the same terms as Perl itself.
+This software is released under the MIT license cited below.
 
-See L<http://www.perl.com/perl/misc/Artistic.html>
+=head2 The "MIT" License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 
 =cut
